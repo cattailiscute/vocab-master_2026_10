@@ -2,7 +2,7 @@
 
 고등 하위권 내신 영단어 암기 사이트입니다.
 
-- **학생 화면**: `https://<깃허브아이디>.github.io/<저장소이름>/`
+- **학생 화면**: https://cattailiscute.github.io/vocab-master_2026_10/
 - **선생님 화면**: 위 주소 뒤에 `teacher.html`
 
 ## 구조
