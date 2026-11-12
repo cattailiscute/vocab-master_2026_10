@@ -195,3 +195,9 @@ textarea[readonly] { width: 100%; background: #f9fafc; }
 .unitbox summary .btn { margin-left: auto; }
 .unitbox table { margin-top: 8px; }
 h3 { font-size: 1rem; margin: 14px 0 6px; }
+.savestate { font-size: .9rem; color: var(--muted); min-height: 1.4em; margin: 6px 0 0; }
+.savestate.saved { color: var(--ok); }
+.savestate.retry { color: var(--warn); }
+.savestate.failed { color: var(--bad); }
+.upd { color: inherit; opacity: .75; font-weight: 400; }
+.upd-t { font-size: .85rem; font-weight: 400; }

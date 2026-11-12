@@ -2,10 +2,14 @@ const app = document.getElementById('app');
 const nav = document.getElementById('nav');
 let token = store.get('vocab_tt');
 let dash = null, formData = null, view = 'home';
+let viewSeq = 0;   // 다른 메뉴로 옮긴 뒤 늦게 온 응답이 화면을 덮어쓰지 않게 함
+const dashKey = klass => 'vocab_dash:' + (token || '').slice(-16) + ':' + (klass || '');
+function readDash(klass) { try { return JSON.parse(store.get(dashKey(klass)) || 'null'); } catch (e) { return null; } }
+function writeDash(klass, d) { try { store.set(dashKey(klass), JSON.stringify(d)); } catch (e) { /* 무시 */ } }
 const studentUrl = new URL('index.html', location.href).href.replace(/index\.html$/, '');
 
 function handleErr(e) {
-  if (e.code === 'AUTH') { token = null; store.set('vocab_tt', null); return showLogin(); }
+  if (e.code === 'AUTH') { clearDash(); token = null; store.set('vocab_tt', null); return showLogin(); }
   toast(e.message, 'error');
 }
 
@@ -17,8 +21,13 @@ function renderNav() {
   nav.querySelectorAll('button').forEach(b => b.onclick = () => go(b.dataset.v));
 }
 
+function clearDash() {
+  try { Object.keys(localStorage).filter(k => k.startsWith('vocab_dash:')).forEach(k => localStorage.removeItem(k)); } catch (e) { /* 무시 */ }
+}
+
 function go(v) {
-  if (v === 'logout') { token = null; store.set('vocab_tt', null); return showLogin(); }
+  viewSeq++;
+  if (v === 'logout') { clearDash(); token = null; store.set('vocab_tt', null); return showLogin(); }
   view = v; renderNav(); window.scrollTo(0, 0);
   ({ home: showHome, words: showWords, students: showStudents, sheet: showSheet, sched: showSched, share: showShare })[v]();
 }
@@ -27,9 +36,15 @@ function go(v) {
 async function showLogin() {
   dash = null; formData = null;
   nav.innerHTML = '<a href="index.html" class="muted">학생 화면</a>';
-  app.innerHTML = '<div class="card narrow center-card"><p class="muted">불러오는 중…</p></div>';
-  let boot = { teachers: [] };
-  try { boot = await api('bootstrap'); } catch (e) { toast(e.message, 'error'); }
+  let boot = null;
+  try { boot = JSON.parse(store.get('vocab_boot') || 'null'); } catch (e) { /* 무시 */ }
+  if (!boot || !boot.teachers) {
+    app.innerHTML = '<div class="card narrow center-card"><p class="muted">불러오는 중…</p></div>';
+    try { boot = await api('bootstrap'); store.set('vocab_boot', JSON.stringify(boot)); } catch (e) { toast(e.message, 'error'); boot = { teachers: [] }; }
+  } else {
+    // 목록은 기기에 저장된 것으로 먼저 보여주고, 뒤에서 새로 받아 둠 (다음 방문 때 반영)
+    api('bootstrap', {}, { quiet: true }).then(b => store.set('vocab_boot', JSON.stringify(b))).catch(() => {});
+  }
   const last = store.get('vocab_tname') || '';
   app.innerHTML = `<div class="card narrow center-card"><h1>선생님 로그인</h1>
     <form class="stack" id="lf">
@@ -50,7 +65,23 @@ async function showLogin() {
 
 // ---------------------------------------------------------------- 현황
 async function showHome(klass) {
-  try { dash = await api('tDashboard', { token, klass: klass || '' }); } catch (e) { return handleErr(e); }
+  const seq = ++viewSeq;
+  const cached = readDash(klass);
+  if (cached) renderDash(cached, klass, true);
+  let d;
+  try { d = await api('tDashboard', { token, klass: klass || '' }, { quiet: !!cached }); }
+  catch (e) {
+    if (seq !== viewSeq) return;
+    if (cached && e.code !== 'AUTH') { const u = document.getElementById('upd'); if (u) u.hidden = true; return toast('최신 현황을 불러오지 못했어요. 잠시 후 다시 열어 주세요.', 'error'); }
+    return handleErr(e);
+  }
+  if (seq !== viewSeq) return;
+  writeDash(klass, d);
+  renderDash(d, klass, false);
+}
+
+function renderDash(d, klass, stale) {
+  dash = d;
   renderNav();
   document.getElementById('brand').textContent = `📘 ${dash.title} · ${dash.me.name}`;
   const classes = dash.me.classes;
@@ -58,7 +89,8 @@ async function showHome(klass) {
   app.innerHTML = `
     ${dash.defaultPw ? '<div class="flash warn">관리자 초기 비밀번호(1234)를 사용 중입니다. 구글 시트 [설정] 탭에서 <b>선생님비밀번호</b>를 꼭 바꾸세요.</div>' : ''}
     ${!classes.length ? '<div class="flash warn">담당 반이 없습니다. 관리자에게 구글 시트 [선생님] 탭의 <b>담당반</b>을 채워 달라고 하세요.</div>' : ''}
-    <div class="page-head"><h1>학생 현황 <small class="muted">${esc(dash.me.admin ? '전체 반' : classes.join(', '))}</small></h1>
+    <div class="page-head"><h1>학생 현황 <small class="muted">${esc(dash.me.admin ? '전체 반' : classes.join(', '))}</small>
+      <small id="upd" class="muted upd-t" ${stale ? '' : 'hidden'}>· 최신 정보 확인 중…</small></h1>
       <div class="filters">
         <button class="chip ${!klass ? 'on' : ''}" data-k="">전체</button>
         ${classes.map(c => `<button class="chip ${klass === c ? 'on' : ''}" data-k="${esc(c)}">${esc(c || '(반 없음)')}</button>`).join('')}
@@ -115,8 +147,10 @@ async function showHome(klass) {
 }
 
 async function showStudent(s) {
+  const seq = ++viewSeq;
   let d;
   try { d = await api('tStudent', { token, klass: s.klass, name: s.name }); } catch (e) { return handleErr(e); }
+  if (seq !== viewSeq) return;
   window.scrollTo(0, 0);
   const st = (u, n) => d.stats[u + '|' + n];
   app.innerHTML = `
